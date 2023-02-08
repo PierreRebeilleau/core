@@ -55,6 +55,7 @@ use ApiPlatform\OpenApi\Options;
 use ApiPlatform\State\Pagination\PaginationOptions;
 use ApiPlatform\Tests\Fixtures\DummyFilter;
 use ApiPlatform\Tests\Fixtures\TestBundle\Dto\OutputDto;
+use ApiPlatform\Tests\Fixtures\TestBundle\Entity\Book;
 use ApiPlatform\Tests\Fixtures\TestBundle\Entity\Dummy;
 use PHPUnit\Framework\TestCase;
 use Prophecy\Argument;
@@ -190,18 +191,51 @@ class OpenApiFactoryTest extends TestCase
                     ]),
                 ),
             )),
-        ])
-        );
+        ]));
+
+        $baseBookOperation = (new HttpOperation())->withTypes(['http://schema.example.com/Book'])->withInputFormats(self::OPERATION_FORMATS['input_formats'])->withOutputFormats(self::OPERATION_FORMATS['output_formats'])->withClass(Book::class)->withShortName('Book')->withDescription('This is a book');
+        $bookResource = (new ApiResource())->withOperations(new Operations([
+            'getBookItemWithCustomResponseDescription' => (new Get())->withUriTemplate('/books/{id}')->withOperation($baseBookOperation)->withOpenapi(new OpenApiOperation(
+                responses: [
+                    '200' => new Response(
+                        description: 'Custom response message'
+                    ),
+                ]
+            )),
+            'putBookItemWithCustomResponseDescription' => (new Put())->withUriTemplate('/books/{id}')->withOperation($baseBookOperation)->withOpenapi(new OpenApiOperation(
+                responses: [
+                    '200' => new Response(
+                        description: 'Custom response message'
+                    ),
+                ]
+            )),
+            'deleteBookItemWithCustomResponseDescription' => (new Delete())->withUriTemplate('/books/{id}')->withOperation($baseBookOperation)->withOpenapi(new OpenApiOperation(
+                responses: [
+                    '204' => new Response(
+                        description: 'Custom response message'
+                    ),
+                ]
+            )),
+            'postBookCollectionWithCustomResponseDescription' => (new Post())->withUriTemplate('/books')->withOperation($baseBookOperation)->withOpenapi(new OpenApiOperation(
+                responses: [
+                    '201' => new Response(
+                        description: 'Custom response message'
+                    ),
+                ]
+            )),
+        ]));
 
         $resourceNameCollectionFactoryProphecy = $this->prophesize(ResourceNameCollectionFactoryInterface::class);
-        $resourceNameCollectionFactoryProphecy->create()->shouldBeCalled()->willReturn(new ResourceNameCollection([Dummy::class]));
+        $resourceNameCollectionFactoryProphecy->create()->shouldBeCalled()->willReturn(new ResourceNameCollection([Dummy::class, Book::class]));
 
         $resourceCollectionMetadataFactoryProphecy = $this->prophesize(ResourceMetadataCollectionFactoryInterface::class);
+        $resourceCollectionMetadataFactoryProphecy->create(Book::class)->shouldBeCalled()->willReturn(new ResourceMetadataCollection(Book::class, [$bookResource]));
         $resourceCollectionMetadataFactoryProphecy->create(Dummy::class)->shouldBeCalled()->willReturn(new ResourceMetadataCollection(Dummy::class, [$dummyResource]));
 
         $propertyNameCollectionFactoryProphecy = $this->prophesize(PropertyNameCollectionFactoryInterface::class);
         $propertyNameCollectionFactoryProphecy->create(Dummy::class, Argument::any())->shouldBeCalled()->willReturn(new PropertyNameCollection(['id', 'name', 'description', 'dummyDate', 'enum']));
         $propertyNameCollectionFactoryProphecy->create(OutputDto::class, Argument::any())->shouldBeCalled()->willReturn(new PropertyNameCollection(['id', 'name', 'description', 'dummyDate', 'enum']));
+        $propertyNameCollectionFactoryProphecy->create(Book::class, Argument::any())->shouldBeCalled()->willReturn(new PropertyNameCollection(['id', 'name']));
 
         $propertyMetadataFactoryProphecy = $this->prophesize(PropertyMetadataFactoryInterface::class);
         $propertyMetadataFactoryProphecy->create(Dummy::class, 'id', Argument::any())->shouldBeCalled()->willReturn(
@@ -233,6 +267,12 @@ class OpenApiFactoryTest extends TestCase
         );
         $propertyMetadataFactoryProphecy->create(OutputDto::class, 'enum', Argument::any())->shouldBeCalled()->willReturn(
             (new ApiProperty())->withBuiltinTypes([new Type(Type::BUILTIN_TYPE_STRING)])->withDescription('This is an enum.')->withReadable(true)->withWritable(true)->withReadableLink(true)->withWritableLink(true)->withOpenapiContext(['type' => 'string', 'enum' => ['one', 'two'], 'example' => 'one'])
+        );
+        $propertyMetadataFactoryProphecy->create(Book::class, 'id', Argument::any())->shouldBeCalled()->willReturn(
+            (new ApiProperty())->withBuiltinTypes([new Type(Type::BUILTIN_TYPE_INT)])->withDescription('This is an id.')->withReadable(true)->withWritable(false)->withIdentifier(true)
+        );
+        $propertyMetadataFactoryProphecy->create(Book::class, 'name', Argument::any())->shouldBeCalled()->willReturn(
+            (new ApiProperty())->withBuiltinTypes([new Type(Type::BUILTIN_TYPE_STRING)])->withDescription('This is a name.')->withReadable(true)->withWritable(true)->withReadableLink(true)->withWritableLink(true)->withRequired(false)->withIdentifier(false)->withSchema(['minLength' => 3, 'maxLength' => 20, 'pattern' => '^bookPattern$'])
         );
 
         $filterLocatorProphecy = $this->prophesize(ContainerInterface::class);
@@ -344,6 +384,28 @@ class OpenApiFactoryTest extends TestCase
             ],
         ]));
 
+        $bookSchema = new Schema('openapi');
+        $bookSchema->setDefinitions(new \ArrayObject([
+            'type' => 'object',
+            'description' => 'This is a book',
+            'externalDocs' => ['url' => 'http://schema.example.com/Book'],
+            'deprecated' => false,
+            'properties' => [
+                'id' => new \ArrayObject([
+                    'type' => 'integer',
+                    'description' => 'This is an id.',
+                    'readOnly' => true,
+                ]),
+                'name' => new \ArrayObject([
+                    'type' => 'string',
+                    'description' => 'This is a name.',
+                    'minLength' => 3,
+                    'maxLength' => 20,
+                    'pattern' => '^bookPattern$',
+                ]),
+            ],
+        ]));
+
         $openApi = $factory(['base_url' => '/app_dev.php/']);
 
         $this->assertInstanceOf(OpenApi::class, $openApi);
@@ -353,7 +415,7 @@ class OpenApiFactoryTest extends TestCase
         $components = $openApi->getComponents();
         $this->assertInstanceOf(Components::class, $components);
 
-        $this->assertEquals($components->getSchemas(), new \ArrayObject(['Dummy' => $dummySchema->getDefinitions(), 'Dummy.OutputDto' => $dummySchema->getDefinitions()]));
+        $this->assertEquals($components->getSchemas(), new \ArrayObject(['Book' => $bookSchema->getDefinitions(), 'Dummy' => $dummySchema->getDefinitions(), 'Dummy.OutputDto' => $dummySchema->getDefinitions()]));
 
         $this->assertEquals($components->getSecuritySchemes(), new \ArrayObject([
             'oauth' => new SecurityScheme('oauth2', 'OAuth 2.0 authorization code Grant', null, null, null, null, new OAuthFlows(null, null, null, new OAuthFlow('/oauth/v2/auth', '/oauth/v2/token', '/oauth/v2/refresh', new \ArrayObject(['scope param'])))),
@@ -694,5 +756,55 @@ class OpenApiFactoryTest extends TestCase
             ),
             deprecated: false,
         ), $requestBodyPath->getPost());
+
+        $booksPath = $paths->getPath('/books/{id}');
+        $this->assertEquals(new Operation(
+            'getBookItemWithCustomResponseDescription',
+            ['Book'],
+            [
+                '200' => new Response('Custom response message'),
+                '404' => new Response('Resource not found'),
+            ],
+            summary: 'Retrieves a Book resource.',
+            description: 'Retrieves a Book resource.',
+            parameters: [],
+            deprecated: false
+        ), $booksPath->getGet());
+        dump($booksPath->getPut());
+        dump($booksPath->getDelete());
+        $this->assertEquals(new Operation(
+            'putBookItemWithCustomResponseDescription',
+            ['Book'],
+            [
+                '200' => new Response('Custom response message'),
+                '400' => new Response('Invalid input'),
+                '422' => new Response('Unprocessable entity'),
+                '404' => new Response('Resource not found'),
+            ],
+            summary: 'Replaces the Book resource.',
+            description: 'Replaces the Book resource.',
+            parameters: [],
+            requestBody: new RequestBody(
+                'The updated Book resource',
+                new \ArrayObject([
+                    'application/ld+json' => new MediaType(new \ArrayObject(new \ArrayObject(['$ref' => '#/components/schemas/Book']))),
+                ]),
+                true
+            ),
+            deprecated: false
+        ), $booksPath->getPut());
+
+        $this->assertEquals(new Operation(
+            'deleteBookItemWithCustomResponseDescription',
+            ['Book'],
+            [
+                '204' => new Response('Custom response message'),
+                '404' => new Response('Resource not found'),
+            ],
+            summary: 'Removes the Book resource.',
+            description: 'Removes the Book resource.',
+            parameters: [],
+            deprecated: false
+        ), $booksPath->getDelete());
     }
 }

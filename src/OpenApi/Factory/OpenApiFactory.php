@@ -283,29 +283,35 @@ final class OpenApiFactory implements OpenApiFactoryInterface
             switch ($method) {
                 case HttpOperation::METHOD_GET:
                     $successStatus = (string) $operation->getStatus() ?: 200;
+                    $responses = $openapiOperation->getResponses();
                     $responseContent = $this->buildContent($responseMimeTypes, $operationOutputSchemas);
-                    $openapiOperation = $openapiOperation->withResponse($successStatus, new Response(sprintf('%s %s', $resourceShortName, $operation instanceof CollectionOperationInterface ? 'collection' : 'resource'), $responseContent));
+                    $openapiOperation = match (true) {
+                        isset($responses[$successStatus]) => $openapiOperation->withResponse($successStatus, $responses[$successStatus]),
+                        !isset($responses[$successStatus]) => $openapiOperation->withResponse($successStatus, new Response(sprintf('%s %s', $resourceShortName, $operation instanceof CollectionOperationInterface ? 'collection' : 'resource'), $responseContent)),
+                    };
                     break;
                 case HttpOperation::METHOD_POST:
                     $responseLinks = $this->getLinks($resourceMetadataCollection, $operation);
                     $responseContent = $this->buildContent($responseMimeTypes, $operationOutputSchemas);
+                    $responses = $openapiOperation->getResponses();
                     $successStatus = (string) $operation->getStatus() ?: 201;
-                    $openapiOperation = $openapiOperation->withResponse($successStatus, new Response(sprintf('%s resource created', $resourceShortName), $responseContent, null, $responseLinks));
-                    $openapiOperation = $openapiOperation->withResponse(400, new Response('Invalid input'));
-                    $openapiOperation = $openapiOperation->withResponse(422, new Response('Unprocessable entity'));
+                    $openapiOperation = $this->setOpenApiResponses($openapiOperation, $responses, $successStatus, $resourceShortName, $responseContent, $responseLinks);
                     break;
                 case HttpOperation::METHOD_PATCH:
                 case HttpOperation::METHOD_PUT:
                     $responseLinks = $this->getLinks($resourceMetadataCollection, $operation);
                     $successStatus = (string) $operation->getStatus() ?: 200;
+                    $responses = $openapiOperation->getResponses();
                     $responseContent = $this->buildContent($responseMimeTypes, $operationOutputSchemas);
-                    $openapiOperation = $openapiOperation->withResponse($successStatus, new Response(sprintf('%s resource updated', $resourceShortName), $responseContent, null, $responseLinks));
-                    $openapiOperation = $openapiOperation->withResponse(400, new Response('Invalid input'));
-                    $openapiOperation = $openapiOperation->withResponse(422, new Response('Unprocessable entity'));
+                    $openapiOperation = $this->setOpenApiResponses($openapiOperation, $responses, $successStatus, $resourceShortName, $responseContent, $responseLinks);
                     break;
                 case HttpOperation::METHOD_DELETE:
                     $successStatus = (string) $operation->getStatus() ?: 204;
-                    $openapiOperation = $openapiOperation->withResponse($successStatus, new Response(sprintf('%s resource deleted', $resourceShortName)));
+                    $responses = $openapiOperation->getResponses();
+                    $openapiOperation = match (true) {
+                        isset($responses[$successStatus]) => $openapiOperation->withResponse($successStatus, $responses[$successStatus]),
+                        !isset($responses[$successStatus]) => $openapiOperation->withResponse($successStatus, new Response(sprintf('%s resource deleted', $resourceShortName))),
+                    };
                     break;
             }
 
@@ -662,5 +668,26 @@ final class OpenApiFactory implements OpenApiFactoryInterface
         }
 
         return false;
+    }
+
+    private function setOpenApiResponses(Model\Operation $openapiOperation, ?array $responses, int|string $successStatus, $resourceShortName, $responseContent, $responseLinks): Model\Operation
+    {
+        $openapiOperation = match (true) {
+            isset($responses[$successStatus]) => $openapiOperation->withResponse($successStatus, $responses[$successStatus]),
+            !isset($responses[$successStatus]) => $openapiOperation->withResponse($successStatus, new Response(
+                201 === $successStatus ? sprintf('%s resource created',
+                    $resourceShortName) : sprintf('%s resource updated', $resourceShortName),
+                $responseContent, null, $responseLinks)),
+        };
+
+        $openapiOperation = match (true) {
+            isset($responses[400]) => $openapiOperation->withResponse(400, $responses[400]),
+            !isset($responses[400]) => $openapiOperation->withResponse(400, new Response('Invalid input')),
+        };
+
+        return match (true) {
+            isset($responses[422]) => $openapiOperation->withResponse(422, $responses[422]),
+            !isset($responses[422]) => $openapiOperation->withResponse(422, new Response('Unprocessable entity')),
+        };
     }
 }
